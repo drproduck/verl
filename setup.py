@@ -26,18 +26,20 @@ install_requires = [
   'codetiming',
   'datasets',
   'dill',
-  'hydra-core',
+  'hydra-core==1.4.0dev1',
+  'omegaconf==2.4.0.dev3', # compatibility with latex2sympy
   'numpy',
   'pandas',
   'peft',
   'pyarrow>=15.0.0',
   'pybind11',
   'pylatexenc',
-  'ray>=2.10',
+  'ray[default]>=2.10',
   'tensordict<0.6',
   'transformers',
-  'vllm<=0.6.3.post1',
+  'vllm<=0.6.3',
   'wandb',
+  'debugpy', # for ray debugging
 ]
 
 TEST_REQUIRES = ['pytest', 'yapf', 'py-spy']

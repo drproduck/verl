@@ -4,7 +4,8 @@ codetiming
 datasets
 dill
 flash-attn
-hydra-core
+hydra-core==1.4.0dev1
+omegaconf==2.4.0.dev3 # compatibility with latex2sympy
 liger-kernel
 numpy
 pandas
@@ -12,8 +13,9 @@ peft
 pyarrow>=15.0.0
 pybind11
 pylatexenc
-ray
+ray[default]
 tensordict<0.6
 transformers
-vllm==0.6.3.post1
+vllm==0.6.3
 wandb
+debugpy # for ray debugging
