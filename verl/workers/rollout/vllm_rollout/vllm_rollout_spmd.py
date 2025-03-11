@@ -87,7 +87,7 @@ class vLLMRollout(BaseRollout):
                                               num_tp_per_train_tp=num_tp_per_train_tp)
 
         assert model_hf_config.max_position_embeddings >= config.prompt_length + config.response_length, \
-            "model context length should be greater than total sequence length"
+            f"model context length should be greater than total sequence length, got {model_hf_config.max_position_embeddings=}, {config.prompt_length=}, {config.response_length=}" \
 
         self.inference_engine = LLM(
             model=model_path,

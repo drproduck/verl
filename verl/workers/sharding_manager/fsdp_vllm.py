@@ -125,6 +125,18 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             torch.cuda.set_rng_state(self.torch_random_states)
 
     def preprocess_data(self, data: DataProto) -> DataProto:
+        """
+        Before generation,
+        gather input data from all devices in the tensor model parallel group.
+        Used when vllm's tensor_parallel_size > 1.
+
+        This method can be considered a correction to the default DP nature of the program
+          which splits data by number of devices,
+          by re-gathering the data in each tensor model parallel group.
+
+        Returns:
+            DataProto: The gathered data.
+        """
         # TODO: Current impl doesn't consider FSDP with torch micro-dp
         if vllm_version in ('0.3.1', '0.4.2', '0.5.4', '0.6.3'):
             data.batch = allgather_dict_tensors(data.batch.contiguous(),
@@ -140,6 +152,25 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         return data
 
     def postprocess_data(self, data: DataProto) -> DataProto:
+        """
+        After generation,
+        re-distribute the generated data to all devices.
+        Used when vllm's tensor_parallel_size > 1.
+
+
+        First, broadcast the output from rank 0 to all devices in the tensor model parallel group.
+        Then, each device keeps a part of the output.
+
+        For example, if tensor_parallel = 2 and data_parallel = 2 and global batch size = 32.
+        This mean there are 2 tensor parallel groups (2 vllm instances), and a vllm instance processes 16 prompts.
+
+        Now, the controller expects a fully data parallel output, so we need to distribute 32 outputs to 4 devices:
+        1. In each tensor parallel group, the 16 prompts from rank 0 is broadcasted to all devices.
+        2. Each device in the tensor parallel group keeps 8 prompts after chunking.
+
+        Returns:
+            DataProto: The postprocessed data.
+        """
         # TODO: Current impl doesn't consider FSDP with torch micro-dp
         local_world_size = vllm_ps.get_tensor_model_parallel_world_size()
         src_rank = (torch.distributed.get_rank() // local_world_size) * local_world_size
