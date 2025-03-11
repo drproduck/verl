@@ -12,6 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module provides classes and functions for managing Ray-based resource pools and worker groups.
+
+Classes:
+    RayResourcePool: Manages Ray placement groups and resources.
+    RayClassWithInitArgs: Wraps a class with initialization arguments for Ray.
+    RayWorkerGroup: Manages a group of Ray workers.
+    
+Functions:
+    get_random_string(length: int) -> str: Generates a random string of specified length.
+    func_generator(self, method_name, dispatch_fn, collect_fn, execute_fn, blocking): Generates a function for dispatching, executing, and collecting results.
+    extract_pg_from_exist(resource_pools: Dict[str, RayResourcePool], src_role_names: List[str], resource_pool: RayResourcePool) -> List: Extracts placement groups from existing resource pools.
+    merge_resource_pool(rp1: RayResourcePool, rp2: RayResourcePool) -> RayResourcePool: Merges two RayResourcePools into one.
+    create_colocated_worker_cls(class_dict: dict[str, RayClassWithInitArgs]): Creates a class that delegates calls to multiple RayClassWithInitArgs instances.
+
+Attributes:
+    __all__: List of public objects of that module, as interpreted by import *.
+"""
+
+
 import time
 from typing import Dict, List, Any, Tuple
 
@@ -22,25 +42,50 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy, Nod
 from ray.experimental.state.api import get_actor
 
 from verl.single_controller.base import WorkerGroup, ResourcePool, ClassWithInitArgs, Worker
+import ipdb
 
 __all__ = ['Worker']
 
 
 def get_random_string(length: int) -> str:
+    """
+    Generate a random string of specified length consisting of ASCII letters and digits.
+
+    Args:
+        length (int): The length of the random string to generate.
+
+    Returns:
+        str: A random string of the specified length.
+    """
     import random
     import string
     letters_digits = string.ascii_letters + string.digits
     return ''.join(random.choice(letters_digits) for _ in range(length))
 
 
-def func_generator(self, method_name, dispatch_fn, collect_fn, execute_fn, blocking):
+def func_generator(worker_group: WorkerGroup, method_name, dispatch_fn, collect_fn, execute_fn, blocking):
+    """
+    Generates a function that dispatches, executes, and collects results of a given method.
+
+    Args:
+        worker_group (WorkerGroup): The worker group to which the method belongs.
+        method_name (str): The name of the method to be executed.
+        dispatch_fn (callable): A function that processes the arguments before execution.
+        collect_fn (callable): A function that processes the output after execution.
+        execute_fn (callable): A function that executes the method.
+        blocking (bool): If True, the function will wait for the result to be available.
+
+    Returns:
+        callable: A function that takes arbitrary arguments, processes them, executes the method,
+                  and processes the output.
+    """
 
     def func(*args, **kwargs):
-        args, kwargs = dispatch_fn(self, *args, **kwargs)
+        args, kwargs = dispatch_fn(worker_group, *args, **kwargs)
         output = execute_fn(method_name, *args, **kwargs)
         if blocking:
             output = ray.get(output)
-        output = collect_fn(self, output)
+        output = collect_fn(worker_group, output)
         return output
 
     return func
@@ -77,12 +122,17 @@ class RayResourcePool(ResourcePool):
 
         lifetime = 'detached' if self.detached else None
 
+        ##########################################
+        # region: asynchronously create placement groups and wait for them to be ready
+        ##########################################
         pgs = [
             placement_group(bundles=bundles, strategy=strategy, name=pg_name_prefix + str(idx), lifetime=lifetime)
             for idx, bundles in enumerate(pg_scheme)
         ]
 
         ray.get([pg.ready() for pg in pgs])
+        # endregion
+        ##########################################
 
         self.pgs = pgs
         return pgs
@@ -126,6 +176,29 @@ def merge_resource_pool(rp1: RayResourcePool, rp2: RayResourcePool) -> RayResour
 
 
 class RayClassWithInitArgs(ClassWithInitArgs):
+    """
+    A class that extends ClassWithInitArgs to provide additional functionality
+    for setting options and additional resources, and for invoking remote
+    methods with Ray.
+
+    Attributes:
+        _options (dict): A dictionary to store options for Ray.
+        _additional_resource (dict): A dictionary to store additional resources.
+
+    Methods:
+        __init__(cls, *args, **kwargs):
+            Initializes the class with the given arguments and keyword arguments.
+        
+        set_additional_resource(additional_resource):
+            Sets the additional resources.
+
+        update_options(options: Dict):
+            Updates the options dictionary with the provided options.
+
+        __call__(placement_group, placement_group_bundle_idx, use_gpu: bool = True, num_gpus=1, sharing_with=None) -> Any:
+            Invokes the remote method with the specified placement group, bundle index,
+            GPU usage, and sharing options.
+    """
 
     def __init__(self, cls, *args, **kwargs) -> None:
         # self._options = kwargs.pop('options', dict())
@@ -174,13 +247,61 @@ class RayClassWithInitArgs(ClassWithInitArgs):
 
 
 class RayWorkerGroup(WorkerGroup):
+    """
+    A class to manage a group of Ray workers.
+
+    Attributes:
+        ray_cls_with_init (RayClassWithInitArgs): The Ray class with initialization arguments.
+        name_prefix (str): The prefix for naming workers.
+        _worker_names (list): The names of the workers.
+        _workers (list): The list of worker instances.
+        _world_size (int): The size of the worker group.
+        _master_addr (str): The address of the master node.
+        _master_port (int): The port of the master node.
+
+    Methods:
+        __init__(resource_pool, ray_cls_with_init, bin_pack, name_prefix, detached, worker_names, **kwargs):
+            Initializes the RayWorkerGroup.
+        _is_worker_alive(worker):
+            Checks if a worker is alive.
+        _init_with_detached_workers(worker_names):
+            Initializes the worker group with detached workers.
+        _init_with_resource_pool(resource_pool, ray_cls_with_init, bin_pack, detached):
+            Initializes the worker group with a resource pool.
+        worker_names():
+            Returns the names of the workers.
+        from_detached(worker_names, ray_cls_with_init):
+            Creates a RayWorkerGroup from detached workers.
+        spawn(prefix_set):
+            Spawns a dictionary of worker groups, each with a subset of methods with a prefix.
+        execute_rank_zero_sync(method_name, *args, **kwargs):
+            Executes a method on the rank zero worker synchronously.
+        execute_rank_zero_async(method_name, *args, **kwargs):
+            Executes a method on the rank zero worker asynchronously.
+        execute_rank_zero(method_name, *args, **kwargs):
+            Executes a method on the rank zero worker.
+        execute_all(method_name, *args, **kwargs):
+            Executes a method on all workers.
+        execute_all_sync(method_name, *args, **kwargs):
+            Executes a method on all workers synchronously.
+        execute_all_async(method_name, *args, **kwargs):
+            Executes a method on all workers asynchronously.
+        master_address():
+            Returns the address of the master node.
+        master_port():
+            Returns the port of the master node.
+        workers():
+            Returns the list of workers.
+        world_size():
+            Returns the size of the worker group.
+    """
 
     def __init__(self,
                  resource_pool: RayResourcePool = None,
                  ray_cls_with_init: RayClassWithInitArgs = None,
                  bin_pack: bool = True,
                  name_prefix: str = None,
-                 detached=False,
+                 detached: bool = False,
                  worker_names=None,
                  **kwargs) -> None:
         super().__init__(resource_pool=resource_pool, **kwargs)
@@ -191,6 +312,11 @@ class RayWorkerGroup(WorkerGroup):
             assert self._is_init_with_detached_workers
             self._worker_names = worker_names
 
+        ##########################################
+        # region: inititalize the resource pool
+        # and worker group
+        # and bind the worker methods
+        ##########################################
         if self._is_init_with_detached_workers:
             self._init_with_detached_workers(worker_names=worker_names)
         else:
@@ -201,6 +327,8 @@ class RayWorkerGroup(WorkerGroup):
 
         if ray_cls_with_init is not None:
             self._bind_worker_method(self.ray_cls_with_init.cls, func_generator)
+        # endregion
+        ##########################################
 
     def _is_worker_alive(self, worker: ray.actor.ActorHandle):
         worker_state_dict = get_actor(worker._actor_id.hex())
@@ -211,12 +339,31 @@ class RayWorkerGroup(WorkerGroup):
         self._workers = workers
         self._world_size = len(worker_names)
 
-    def _init_with_resource_pool(self, resource_pool, ray_cls_with_init, bin_pack, detached):
+    def _init_with_resource_pool(self, resource_pool: RayResourcePool, ray_cls_with_init: RayClassWithInitArgs, bin_pack: bool, detached: bool):
+        """
+        Initialize the controller with a resource pool.
+
+        Args:
+            resource_pool (RayResourcePool): The resource pool to use for allocating resources.
+            ray_cls_with_init (RayClassWithInitArgs): The Ray class with initialization arguments.
+            bin_pack (bool): Whether to use bin packing strategy for resource allocation.
+            detached (bool): Whether the workers should be detached.
+
+        Raises:
+            AssertionError: If the local world size exceeds the placement group bundle count.
+            Exception: If no resource is available in the resource pool.
+
+        Notes:
+            - This method sets up the environment variables for each worker.
+            - It creates workers and appends them to the `_workers` list.
+            - The first worker (rank 0) retrieves the master address and port from the register center actor.
+        """
         use_gpu = resource_pool.use_gpu
 
         strategy = "PACK"
         if bin_pack:
             strategy = "STRICT_PACK"
+        # NOTE: grab this resource. If no resource, it will raise an exception
         pgs = resource_pool.get_placement_groups(strategy=strategy)
         world_size = resource_pool.world_size
         self._world_size = world_size
@@ -283,6 +430,17 @@ class RayWorkerGroup(WorkerGroup):
 
     @classmethod
     def from_detached(cls, worker_names=None, ray_cls_with_init=None):
+        """
+        Creates an instance of the class with a detached worker group.
+        Use init_with_detached_workers()
+
+        Args:
+            worker_names (list, optional): A list of names for the workers. Defaults to None.
+            ray_cls_with_init (type, optional): A Ray class with an initializer. Defaults to None.
+
+        Returns:
+            object: An instance of the class with the specified worker group.
+        """
         worker_group = cls(resource_pool=None,
                            ray_cls_with_init=ray_cls_with_init,
                            name_prefix=None,
@@ -291,13 +449,34 @@ class RayWorkerGroup(WorkerGroup):
 
     def spawn(self, prefix_set):
         """
-        spawn to a dictionary of worker groups, each with a subset of method with prefix.
+        Spawns a dictionary of worker groups, each with a subset of methods prefixed by a given set of prefixes.
 
+        Args:
+            prefix_set (set): A set of prefixes to be used for rebinding methods in worker groups.
+
+        Returns:
+            dict: A dictionary where keys are prefixes and values are worker groups with methods rebound to their original names.
         """
 
         def _rebind_actor_methods(worker_group, actor_name):
             """
+            Rebinds actor methods in a worker group to their original names.
+
+            # orig note:
             bind the method with actor_prefix to its original name
+
+            This function iterates over all method names in the given worker group
+            and checks if they start with a specified actor name prefix. If a method
+            name starts with the prefix, the prefix is removed from the method name,
+            and the method is rebound to its original name.
+
+            Args:
+                worker_group: The worker group containing the actor methods.
+                actor_name: The prefix used to identify the actor methods.
+
+            Note:
+                This function requires Python 3.9 or later due to the use of the
+                `removeprefix` string method.
             """
             prefix: str = actor_name + '_'
             for method_name in dir(worker_group):
@@ -417,10 +596,26 @@ def _unwrap_ray_remote(cls):
     return cls
 
 
-def create_colocated_worker_cls(class_dict: dict[str, RayClassWithInitArgs]):
+def create_colocated_worker_cls(class_dict: Dict[str, RayClassWithInitArgs]) -> RayClassWithInitArgs:
     """
+    Create a colocated worker class that combines multiple Role classes into a single process.
+
+    # orig note:
     This function should return a class instance that delegates the calls to every 
     cls in cls_dict
+
+    Args:
+        class_dict (dict[str, RayClassWithInitArgs]): A dictionary where the keys are string identifiers and the values 
+                                                      are RayClassWithInitArgs instances containing the class and its 
+                                                      initialization arguments.
+
+    Returns:
+        RayClassWithInitArgs: A RayClassWithInitArgs instance representing the remote worker class that combines the 
+                              specified classes into a single process.
+
+    Raises:
+        AssertionError: If the base worker class is not the same for all provided classes or if the keys of cls_dict 
+                        and init_args_dict do not match.
     """
     cls_dict = {}
     init_args_dict = {}

@@ -23,6 +23,23 @@ MAGIC_ATTR = 'attrs_3141562937'
 
 
 class Dispatch(Enum):
+    """
+    Enum class representing different dispatch strategies.
+
+    Attributes:
+        RANK_ZERO: Only rank zero is involved.
+        ONE_TO_ALL: One rank sends data to all other ranks.
+        ALL_TO_ALL: All ranks send data to all other ranks.
+        MEGATRON_COMPUTE: Megatron compute.
+        MEGATRON_PP_AS_DP: Megatron pipeline parallelism as data parallelism.
+        MEGATRON_PP_ONLY: Megatron pipeline parallelism only.
+        MEGATRON_COMPUTE_PROTO: Prototype for Megatron compute.
+        MEGATRON_PP_AS_DP_PROTO: Prototype for Megatron pipeline parallelism as data parallelism.
+        DP_COMPUTE: Data parallel compute.
+        DP_COMPUTE_PROTO: Prototype for data parallel compute.
+        DP_COMPUTE_PROTO_WITH_FUNC: Prototype for data parallel compute with function.
+        DP_COMPUTE_METRIC: Data parallel compute with metrics.
+    """
     RANK_ZERO = 0
     ONE_TO_ALL = 1
     ALL_TO_ALL = 2

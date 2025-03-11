@@ -272,6 +272,9 @@ class DataProto:
 
     @classmethod
     def from_single_dict(cls, data: Dict[str, Union[torch.Tensor, np.ndarray]], meta_info=None):
+        """
+        Create a DataProto from a single dict of tensors and non-tensors.
+        """
         tensors = {}
         non_tensors = {}
 

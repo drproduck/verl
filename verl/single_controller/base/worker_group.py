@@ -22,7 +22,6 @@ from typing import List, Any, Callable, Dict
 
 from .decorator import MAGIC_ATTR, Dispatch, get_predefined_dispatch_fn, get_predefined_execute_fn
 
-
 class ResourcePool:
     """The resource pool with meta info such as world_size."""
 
@@ -90,7 +89,38 @@ def check_workers_alive(workers: List, is_alive: Callable, gap_time: float = 1) 
 
 
 class WorkerGroup:
-    """A group of workers"""
+    """
+    WorkerGroup is a base class that manages a group of workers. It provides methods to check the aliveness of workers,
+    start a thread to periodically check worker aliveness, and bind user-defined methods to the WorkerGroup.
+
+    Attributes:
+        _is_init_with_detached_workers (bool): Indicates if the WorkerGroup is initialized with detached workers.
+        _procecss_dispatch_config (Any): Configuration for process dispatching.
+        _workers (list): List of worker instances.
+        _worker_names (list): List of worker names.
+        _master_addr (str): Address of the master node.
+        _master_port (int): Port of the master node.
+        _checker_thread (threading.Thread): Thread for checking worker aliveness.
+
+    Methods:
+        __init__(resource_pool: ResourcePool, **kwargs) -> None:
+            Initializes the WorkerGroup with the given resource pool and additional keyword arguments.
+
+        _is_worker_alive(worker):
+            Checks if a worker is alive. Should be implemented in a derived class.
+
+        _block_until_all_workers_alive() -> None:
+            Blocks until all workers are alive.
+
+        start_worker_aliveness_check(every_n_seconds=1) -> None:
+            Starts a thread to periodically check the aliveness of workers.
+
+        world_size:
+            Returns the number of workers in the WorkerGroup.
+
+        _bind_worker_method(user_defined_cls, func_generator):
+            Binds user-defined methods to the WorkerGroup.
+    """
 
     def __init__(self, resource_pool: ResourcePool, **kwargs) -> None:
         self._is_init_with_detached_workers = True if resource_pool is None else False
@@ -137,7 +167,23 @@ class WorkerGroup:
 
     def _bind_worker_method(self, user_defined_cls, func_generator):
         """
-        Bind the worker method to the WorkerGroup
+        Bind the worker method to the WorkerGroup.
+
+        This method iterates over all methods of the user-defined class, checks if they are callable,
+        and if they have a specific attribute (MAGIC_ATTR). If the attribute is present, it retrieves
+        the dispatch mode, execute mode, and blocking information from the attribute. It then gets the
+        corresponding dispatch and collect functions, as well as the execute function, and binds a new
+        method to the WorkerGroup using the provided function generator.
+
+        Args:
+            user_defined_cls (type): The user-defined class containing methods to be bound.
+            func_generator (callable): A function that generates the new method to be bound.
+
+        Raises:
+            AssertionError: If a method in user_defined_cls is not callable, or if the attribute is not
+                            a dictionary, or if the attribute does not contain 'dispatch_mode'.
+            Exception: If there is an error in getting the method from user_defined_cls.
+            ValueError: If there is an error in setting the new method to the WorkerGroup.
         """
 
         for method_name in dir(user_defined_cls):
