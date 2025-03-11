@@ -3,6 +3,7 @@ data:
   train_files: ~/data/rlhf/gsm8k/train.parquet
   val_files: ~/data/rlhf/gsm8k/test.parquet
   prompt_key: prompt
+  answer_key: answer
   max_prompt_length: 512
   max_response_length: 512
   train_batch_size: 1024
@@ -172,3 +173,4 @@ trainer:
   remove_previous_ckpt_in_save: False
   del_local_ckpt_after_load: False
   default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  val_before_train: True

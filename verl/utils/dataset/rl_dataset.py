@@ -54,6 +54,109 @@ def collate_fn(data_list: list[dict]) -> dict:
     return output
 
 
+class MathQuestionAnswerDataset(Dataset):
+    """
+    Each data point must include a question and a verifiable answer. 
+    No prompt truncation is performed, as math questions are typically short and truncation may alter the problem. 
+    It is assumed that any `apply_chat_template` processing is done beforehand. Only tokenization is applied to the raw prompt.
+    The dataset is expected to contain a column with prompts and additional information.
+
+    changes from RLHFDataset:
+    - no chat template
+    - no truncation
+    - no copy from hdfs to local
+    - no resume logic (not sure what it does)
+    """
+
+    def __init__(self,
+                 parquet_files: Union[str, List[str]],
+                 tokenizer: PreTrainedTokenizer,
+                 prompt_key='prompt',
+                 answer_key='answer',
+                 max_prompt_length=1024,
+                 ):
+        """
+        """
+    
+        if not isinstance(parquet_files, (List, ListConfig)):
+            parquet_files = [parquet_files]
+
+        self.parquet_files = copy.deepcopy(parquet_files)
+        self.tokenizer = tokenizer
+        self.max_prompt_length = max_prompt_length
+
+        self.prompt_key = prompt_key
+        self.answer_key = answer_key
+
+        # whether to store the dataset in state_dict()
+        # default not store
+        self.serialize_dataset = False
+        self._read_files_and_tokenize()
+
+
+    def _read_files_and_tokenize(self):
+        print(f'loading dataset from {self.parquet_files}')
+        dataframes = []
+        for parquet_file in self.parquet_files:
+            # read parquet files and cache
+            dataframe = pd.read_parquet(parquet_file)
+            dataframes.append(dataframe)
+        self.dataframe = pd.concat(dataframes)
+
+        print(f'original dataset len: {len(self.dataframe)}')
+
+
+    def __len__(self):
+        return len(self.dataframe)
+
+
+    def __getitem__(self, item):
+        """
+        We do not apply chat template.
+        """
+        row_dict = self.dataframe.iloc[item].to_dict()
+
+        prompt = row_dict.pop(self.prompt_key)
+        # input_data = self.tokenizer(prompt, return_tensors='pt', add_special_tokens=False)
+
+        # input_ids = input_data['input_ids']
+        # attention_mask = input_data['attention_mask']
+
+        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt,
+                                                                         tokenizer=self.tokenizer,
+                                                                         max_length=self.max_prompt_length,
+                                                                         pad_token_id=self.tokenizer.pad_token_id,
+                                                                         left_pad=True,
+                                                                         truncation='error',
+                                                                         )
+
+        position_ids = compute_position_id_with_mask(attention_mask)
+
+        row_dict['input_ids'] = input_ids[0]
+        row_dict['attention_mask'] = attention_mask[0]
+        row_dict['position_ids'] = position_ids[0]
+
+        # replace answer_key with answer
+        row_dict['answer'] = row_dict.pop(self.answer_key)
+
+        # add index for each prompt
+        index = row_dict.get("extra_info", {}).get("index", 0)
+        row_dict["index"] = index
+
+        return row_dict
+
+
+    def __getstate__(self):
+        if not self.serialize_dataset:
+            state = self.__dict__.copy()
+
+            if 'dataframe' in state:
+                del state['dataframe']
+            return state
+        return self.__dict__.copy()
+
+
+
 class RLHFDataset(Dataset):
     """
     We assume the dataset contains a column that contains prompts and other information
@@ -68,7 +171,12 @@ class RLHFDataset(Dataset):
                  cache_dir='~/.cache/verl/rlhf',
                  chat_template_func=None,
                  return_raw_chat=False,
-                 truncation='error'):
+                 truncation='error',
+                 ):
+        """
+        return_raw_chat: do not use the tokenizer's apply_chat_template
+        """
+    
         if not isinstance(parquet_files, (List, ListConfig)):
             parquet_files = [parquet_files]
 

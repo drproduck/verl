@@ -473,7 +473,8 @@ class ActorRolloutRefWorker(Worker):
                 offload_fsdp_optimizer(optimizer=self.actor_optimizer)
 
             log_gpu_memory_usage('After entering rollout sharding manager', logger=logger)
-
+            # gather data within a tensor parallel group.
+            # after this step, prompts size should be x tensor_parallel.
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
             output = self.rollout.generate_sequences(prompts=prompts)
 
@@ -689,6 +690,7 @@ class CriticWorker(Worker):
 
         self.critic_model_config = critic_model_config
 
+        # NOTE: interesting bit on mixed precision. How do they choose the dtype?
         fsdp_config = self.config.model.fsdp_config
         mixed_precision_config = fsdp_config.get('mixed_precision', None)
         if mixed_precision_config is not None:
@@ -855,6 +857,9 @@ class CriticWorker(Worker):
             offload_fsdp_optimizer(self.critic_optimizer)
 
 
+##########################################
+# region: we don't use reward model
+##########################################
 # TODO(sgm): we may need to extract it to dp_reward_model.py
 class RewardModelWorker(Worker):
     """
@@ -1131,3 +1136,6 @@ class RewardModelWorker(Worker):
         output = output.to('cpu')
         torch.cuda.empty_cache()
         return output
+
+# endregion
+##########################################

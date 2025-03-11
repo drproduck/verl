@@ -28,7 +28,7 @@ from copy import deepcopy
 import numpy as np
 from codetiming import Timer
 from omegaconf import OmegaConf, open_dict
-from verl import DataProto
+from verl.protocol import DataProto
 from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 from verl.single_controller.base import Worker
 from verl.single_controller.ray import RayResourcePool, RayWorkerGroup, RayClassWithInitArgs
@@ -36,7 +36,7 @@ from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo import core_algos
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
-from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
+from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn, MathQuestionAnswerDataset
 from torch.utils.data import RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
@@ -494,13 +494,19 @@ class RayPPOTrainer(object):
 
     def _create_dataloader(self):
         # TODO: we have to make sure the batch size is divisible by the dp size
-        self.train_dataset = RLHFDataset(parquet_files=self.config.data.train_files,
-                                         tokenizer=self.tokenizer,
-                                         prompt_key=self.config.data.prompt_key,
-                                         max_prompt_length=self.config.data.max_prompt_length,
-                                         filter_prompts=True,
-                                         return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                         truncation='error')
+        # self.train_dataset = RLHFDataset(parquet_files=self.config.data.train_files,
+        #                                  tokenizer=self.tokenizer,
+        #                                  prompt_key=self.config.data.prompt_key,
+        #                                  max_prompt_length=self.config.data.max_prompt_length,
+        #                                  filter_prompts=True,
+        #                                  return_raw_chat=self.config.data.get('return_raw_chat', False),
+        #                                  truncation='error')
+        self.train_dataset = MathQuestionAnswerDataset(parquet_files=self.config.data.train_files,
+                                                       tokenizer=self.tokenizer,
+                                                       prompt_key=self.config.data.prompt_key,
+                                                       answer_key=self.config.data.answer_key
+                                                       max_prompt_length=self.config.data.max_prompt_length,
+                                                       )
         # use sampler for better ckpt resume
         if self.config.data.shuffle:
             train_dataloader_generator = torch.Generator()
@@ -515,13 +521,19 @@ class RayPPOTrainer(object):
                                                    collate_fn=collate_fn,
                                                    sampler=sampler)
 
-        self.val_dataset = RLHFDataset(parquet_files=self.config.data.val_files,
-                                       tokenizer=self.tokenizer,
-                                       prompt_key=self.config.data.prompt_key,
-                                       max_prompt_length=self.config.data.max_prompt_length,
-                                       filter_prompts=True,
-                                       return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                       truncation='error')
+        # self.val_dataset = RLHFDataset(parquet_files=self.config.data.val_files,
+        #                                tokenizer=self.tokenizer,
+        #                                prompt_key=self.config.data.prompt_key,
+        #                                max_prompt_length=self.config.data.max_prompt_length,
+        #                                filter_prompts=True,
+        #                                return_raw_chat=self.config.data.get('return_raw_chat', False),
+        #                                truncation='error')
+        self.val_dataset = MathQuestionAnswerDataset(parquet_files=self.config.data.train_files,
+                                                     tokenizer=self.tokenizer,
+                                                     prompt_key=self.config.data.prompt_key,
+                                                     answer_key=self.config.data.answer_key
+                                                     max_prompt_length=self.config.data.max_prompt_length,
+                                                     )
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,
@@ -546,7 +558,9 @@ class RayPPOTrainer(object):
         self.total_training_steps = total_training_steps
         print(f'Total training steps: {self.total_training_steps}')
 
+        # once struct mode is enabled, we cannot add new keys to the config, only modify existing keys
         OmegaConf.set_struct(self.config, True)
+
         with open_dict(self.config):
             self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
             self.config.critic.optim.total_training_steps = total_training_steps
@@ -718,7 +732,10 @@ class RayPPOTrainer(object):
         all_wg = {}
         self.wg_dicts = []
         for resource_pool, class_dict in self.resource_pool_to_cls.items():
+            # NOTE: merge classes sharing the same resource into 1 class
             worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
+            # NOTE: ray_worker_group_cls is RayWorkerGroup by default
+
             wg_dict = self.ray_worker_group_cls(resource_pool=resource_pool, ray_cls_with_init=worker_dict_cls)
             spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
             all_wg.update(spawn_wg)
@@ -886,9 +903,13 @@ class RayPPOTrainer(object):
                 gen_batch = batch.pop(batch_keys=['input_ids', 'attention_mask', 'position_ids'])
 
                 with _timer('step', timing_raw):
-                    # generate a batch
+                    ##########################################
+                    # region: generate rollouts
+                    ##########################################
                     with _timer('gen', timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                    # endregion
+                    ##########################################
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer('gen_max', timing_raw):
@@ -921,6 +942,7 @@ class RayPPOTrainer(object):
                     batch.meta_info['global_token_num'] = torch.sum(batch.batch['attention_mask'], dim=-1).tolist()
 
                     # recompute old_log_probs
+                    # TODO: why not take log_probs from vllm?
                     with _timer('old_log_prob', timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         batch = batch.union(old_log_prob)
