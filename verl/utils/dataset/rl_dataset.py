@@ -153,6 +153,7 @@ class MathQuestionAnswerDataset(Dataset):
         row_dict['input_ids'] = input_ids[0]
         row_dict['attention_mask'] = attention_mask[0]
         row_dict['position_ids'] = position_ids[0]
+        row_dict['raw_prompt_ids'] = self.tokenizer.encode(prompt, add_special_tokens=False)
 
         # replace answer_key with answer
         row_dict['answer'] = row_dict.pop(self.answer_key)

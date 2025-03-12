@@ -220,8 +220,7 @@ def log_seqlen_unbalance(seqlen_list: List[int], partitions: List[List[int]], pr
 def ceildiv(a, b):
     return -(a // -b)
 
-
-def rearrange_micro_batches(batch: TensorDict, max_token_len, dp_group=None):
+def rearrange_micro_batches(batch: TensorDict, max_token_len, dp_group=None) -> List[torch.Tensor]:
     """Split the batch into a list of micro_batches, where the max_token_len is smaller than max_token_len
     and the number of valid tokens in each micro batch is well balanced.
     """
@@ -233,6 +232,8 @@ def rearrange_micro_batches(batch: TensorDict, max_token_len, dp_group=None):
     seq_len_effective: torch.Tensor = batch['attention_mask'].sum(dim=1)
     total_seqlen = seq_len_effective.sum().item()
     num_micro_batches = ceildiv(total_seqlen, max_token_len)
+
+    # ensure number of micro-batches is the same across all processes
     if dist.is_initialized():
         num_micro_batches = torch.tensor([num_micro_batches], device='cuda')
         dist.all_reduce(num_micro_batches, op=dist.ReduceOp.MAX, group=dp_group)

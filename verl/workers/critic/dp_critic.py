@@ -224,6 +224,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                                                                          cliprange_value=self.config.cliprange_value)
                     if self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz
+                        # NOTE: this seems heuristic?
                         loss = vf_loss * (len(data) / self.config.ppo_mini_batch_size)
                     else:
                         loss = vf_loss / self.gradient_accumulation
