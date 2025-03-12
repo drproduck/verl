@@ -40,6 +40,7 @@ install_requires = [
   'vllm',
   'wandb',
   'debugpy', # for ray debugging
+  'math-verify'
 ]
 
 TEST_REQUIRES = ['pytest', 'yapf', 'py-spy']

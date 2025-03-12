@@ -19,3 +19,4 @@ transformers
 vllm
 wandb
 debugpy # for ray debugging
+math-verify
