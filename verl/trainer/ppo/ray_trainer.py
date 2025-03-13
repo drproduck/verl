@@ -1071,6 +1071,19 @@ class RayPPOTrainer(object):
                 # Implement actual tflpo and theoretical tflpo
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
 
+                # for comparison with openrlhf
+                metrics.update({
+                    'train/values': metrics['critic/values/mean'],
+                    'train/return': metrics['critic/returns/mean'],
+                    'train/response_length': metrics['response_length/mean'], 
+                    'train/reward': metrics['critic/rewards/mean'],
+                    'train/actor_lr': metrics['actor/lr'],
+                    'train/critic_lr': metrics['critic/lr'],
+                    'train/policy_loss': metrics['actor/pg_loss'],
+                    'train/critic_loss': metrics['critic/vf_loss'],
+                    'train/kl': metrics['actor/ppo_kl'],
+                })
+
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
 
