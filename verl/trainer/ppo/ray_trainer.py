@@ -316,6 +316,20 @@ def compute_data_metrics(batch, use_critic=True):
         valid_values = torch.masked_select(values, response_mask)
         return_diff_var = torch.var(valid_returns - valid_values)
         return_var = torch.var(valid_returns)
+        
+        # correlation between response length and values
+        from scipy.stats import kendalltau
+        length_tau, length_p = kendalltau(
+            sequence_score.to(torch.float).flatten().cpu().numpy(),
+            prompt_length.to(torch.float).flatten().cpu().numpy())
+
+        value_tau, value_p = kendalltau(
+            sequence_score.to(torch.float).flatten().cpu().numpy(),
+            masked_mean(values, response_mask, axis=-1).to(torch.float).flatten().cpu().numpy())
+
+        length_value_tau, length_value_p = kendalltau(
+            prompt_length.to(torch.float).flatten().cpu().numpy(),
+            masked_mean(values, response_mask, axis=-1).to(torch.float).flatten().cpu().numpy())
 
     metrics = {
         # score
@@ -353,6 +367,12 @@ def compute_data_metrics(batch, use_critic=True):
             'critic/values/min': torch.min(valid_values).detach().item(),
             # vf explained var
             'critic/vf_explained_var': (1.0 - return_diff_var / (return_var + 1e-5)).detach().item(),
+            'correlation/tau_score_length': length_tau,
+            'correlation/p_score_length': length_p,
+            'correlation/tau_score_value': value_tau,
+            'correlation/p_score_value': value_p,
+            'correlation/tau_length_value': length_value_tau,
+            'correlation/p_length_value': length_value_p,
         } if use_critic else {}),
 
         # response length
