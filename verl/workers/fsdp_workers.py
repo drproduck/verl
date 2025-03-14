@@ -777,9 +777,15 @@ class CriticWorker(Worker):
         if self._is_offload_optimizer:
             offload_fsdp_optimizer(optimizer=self.critic_optimizer)
 
-        self.critic = DataParallelPPOCritic(config=self.config,
-                                            critic_module=self.critic_module,
-                                            critic_optimizer=self.critic_optimizer)
+        if self.config.algorithm.adv_estimator == 'difficulty':
+            from verl.workers.critic.dp_critic import DataParallelPPOCriticOneStep
+            self.critic = DataParallelPPOCriticOneStep(config=self.config,
+                                                         critic_module=self.critic_module,
+                                                         critic_optimizer=self.critic_optimizer)
+        else:
+            self.critic = DataParallelPPOCritic(config=self.config,
+                                                critic_module=self.critic_module,
+                                                critic_optimizer=self.critic_optimizer)
 
         self.flops_counter = FlopsCounter(self.critic_model_config)
         self.checkpoint_manager = FSDPCheckpointManager(
@@ -792,6 +798,10 @@ class CriticWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
+        """
+        Computes values using the critic module with the provided data.
+        This operation is inside torch.no_grad().
+        """
 
         # Support all hardwares
         data = data.to(torch.cuda.current_device())

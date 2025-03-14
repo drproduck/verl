@@ -67,6 +67,7 @@ class AdvantageEstimator(str, Enum):
     REINFORCE_PLUS_PLUS = 'reinforce_plus_plus'
     REMAX = 'remax'
     RLOO = 'rloo'
+    DIFFICULTY = 'difficulty'
 
 
 @dataclass
@@ -161,6 +162,22 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, 
 
 
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1):
+    """
+    Compute the advantage and return for a given batch of data using the specified advantage estimator.
+
+    Parameters:
+    data (DataProto): The input data containing batches of values, responses, attention masks, and token-level rewards.
+    adv_estimator (AdvantageEstimator): The advantage estimator to use. Options include GAE, GRPO, REINFORCE_PLUS_PLUS, REMAX, and RLOO.
+    gamma (float, optional): Discount factor for future rewards. Default is 1.0.
+    lam (float, optional): Smoothing parameter for GAE. Default is 1.0.
+    num_repeat (int, optional): Number of times to repeat the computation. Default is 1.
+
+    Returns:
+    DataProto: The input data with computed advantages and returns added to the batch.
+    
+    Raises:
+    NotImplementedError: If the specified advantage estimator is not implemented.
+    """
     # prepare response group
     # TODO: add other ways to estimate advantages
     if adv_estimator == AdvantageEstimator.GAE:
@@ -227,6 +244,24 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
                                                                         index=index)
         data.batch['advantages'] = advantages
         data.batch['returns'] = returns
+
+    elif adv_estimator == AdvantageEstimator.DIFFICULTY:
+        # NOTE: assuming that values is [bs, reponse_length]
+        response_length = data.batch['responses'].shape[-1]
+        token_level_rewards = data.batch['token_level_rewards']
+        values = data.batch['values']
+        attention_mask = data.batch['attention_mask']
+        response_mask = attention_mask[:, -response_length:]
+        with torch.no_grad():
+            token_level_rewards = token_level_rewards.to(torch.bfloat16)
+            response_length = token_level_rewards.shape[-1]
+            returns = token_level_rewards.sum(dim=-1)
+            scores = returns - values.mean(dim=-1)
+            scores = scores.unsqueeze(-1).tile([1, response_length]) * response_mask
+            returns = returns.unsqueeze(-1).tile([1, response_length]) * response_mask
+            data.batch['advantages'] = scores
+            data.batch['returns'] = returns
+
     else:
         raise NotImplementedError
     return data
@@ -438,7 +473,7 @@ class RayPPOTrainer(object):
         else:
             self.kl_ctrl = core_algos.FixedKLController(kl_coef=0.)
 
-        if self.config.algorithm.adv_estimator == AdvantageEstimator.GAE:
+        if self.config.algorithm.adv_estimator in [AdvantageEstimator.GAE, AdvantageEstimator.DIFFICULTY]:
             self.use_critic = True
         elif self.config.algorithm.adv_estimator in [
                 AdvantageEstimator.GRPO, AdvantageEstimator.REINFORCE_PLUS_PLUS, AdvantageEstimator.REMAX,
@@ -453,6 +488,12 @@ class RayPPOTrainer(object):
 
     def _validate_config(self):
         config = self.config
+
+        # avoid add kl to reward in GRPO
+        # note RLOO also includes kl in reward.
+        if config.algorithm.adv_estimator in [AdvantageEstimator.GRPO, AdvantageEstimator.DIFFICULTY]:
+            assert config.actor_rollout_ref.actor.use_kl_loss is True, 'GRPO separates kl loss from reward.'
+
         # number of GPUs total
         n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
 
@@ -1014,10 +1055,14 @@ class RayPPOTrainer(object):
                             batch = batch.union(reward_tensor)
 
                         # we combine with rule-based rm
+                        # NOTE: reward_tensor simply has a single reward at the last token.
                         reward_tensor = self.reward_fn(batch)
                         batch.batch['token_level_scores'] = reward_tensor
 
                         # compute rewards. apply_kl_penalty if available
+                        # NOTE: kl penalty modifies the token_level_scores.
+                        # before: each token has the same reward.
+                        # after: each token may have different reward.
                         if not self.config.actor_rollout_ref.actor.get('use_kl_loss', False):
                             batch, kl_metrics = apply_kl_penalty(batch,
                                                                  kl_ctrl=self.kl_ctrl,
@@ -1073,7 +1118,6 @@ class RayPPOTrainer(object):
 
                 # for comparison with openrlhf
                 metrics.update({
-                    'train/values': metrics['critic/values/mean'],
                     'train/return': metrics['critic/returns/mean'],
                     'train/response_length': metrics['response_length/mean'], 
                     'train/reward': metrics['critic/rewards/mean'],
@@ -1083,6 +1127,11 @@ class RayPPOTrainer(object):
                     'train/critic_loss': metrics['critic/vf_loss'],
                     'train/kl': metrics['actor/ppo_kl'],
                 })
+
+                if self.use_critic:
+                    metrics.update({
+                        'train/values': metrics['critic/values/mean'],
+                    })
 
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)

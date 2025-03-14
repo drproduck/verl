@@ -13,6 +13,9 @@
 # limitations under the License.
 """
 Implement a multiprocess PPOCritic
+
+remember that prediction lots should be shifted left by 1,
+so the first prediction is conditional on the prompt, not prompt + first response token.
 """
 import itertools
 from typing import Iterable
@@ -34,6 +37,17 @@ from verl.utils.seqlen_balancing import rearrange_micro_batches, get_reverse_idx
 from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_first_axis
 
 __all__ = ['DataParallelPPOCritic']
+
+"""
+
+
+TODO: support value bce loss, and one-step value model
+value bce loss:
+    + separate KL loss (as done in grpo). This is necessary because if reward is augmented with kl it will be outside the range of (0, 1)
+    + new class 
+one-step value model:
+    + patch the attention mask to make the model only predict the value in the first head
+"""
 
 
 class DataParallelPPOCritic(BasePPOCritic):
@@ -64,6 +78,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                 position_ids = position_ids.transpose(0, 1)
 
             if self.use_remove_padding:
+                # NOTE: concatenate all sequences' non-pad input_ids in the batch.
                 input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1),
                                                            attention_mask)  # input_ids_rmpad (total_nnz, ...)
                 input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
@@ -101,7 +116,7 @@ class DataParallelPPOCritic(BasePPOCritic):
 
                 # pad it back
                 values = pad_input(values_rmpad, indices=indices, batch=batch, seqlen=seqlen).squeeze(-1)
-                values = values[:, -response_length - 1:-1]
+                values = values[:, -response_length - 1:-1] # shift left by 1.
             else:
                 output = self.critic_module(input_ids=input_ids,
                                             attention_mask=attention_mask,
@@ -211,7 +226,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     returns = data['returns']
                     response_length = responses.size(1)
 
-                    eos_mask = attention_mask[:, -response_length - 1:-1]
+                    eos_mask = attention_mask[:, -response_length - 1:-1] # shift left by 1
 
                     vpreds = self._forward_micro_batch(data)
 
@@ -244,3 +259,56 @@ class DataParallelPPOCritic(BasePPOCritic):
                 append_to_dict(metrics, data)
         self.critic_optimizer.zero_grad()
         return metrics
+
+
+class DataParallelPPOCriticOneStep(DataParallelPPOCritic):
+    """
+    predict a bernoulli value at the end of the prompt. (first token of the response)
+    This should be considered a quick patch to the super class, for experimentation purposes.
+    """
+    def __init__(self, config, critic_module, critic_optimizer):
+        super().__init__(config, critic_module, critic_optimizer)
+
+        # dynamically change the compute_value_loss in update_critic
+        def compute_sigmoid_loss(vpreds, returns, values, eos_mask, cliprange_value):
+            """
+            vpreds is expited
+            """
+            vf_losses = torch.nn.functional.binary_cross_entropy(vpreds, returns, reduction='none')
+            vf_loss = torch.mean(vf_losses * eos_mask)
+            return vf_loss, vf_loss
+
+        core_algos.compute_value_loss = compute_sigmoid_loss
+
+    def _forward_micro_batch(self, micro_batch):
+        # responses = micro_batch['responses']
+        # response_length = responses.size(-1)
+        # input_ids = micro_batch['input_ids']
+        # batch, seqlen = input_ids.shape
+        # attention_mask = micro_batch['attention_mask']
+        # position_ids = micro_batch['position_ids']
+        
+        # prompt_length = seqlen - response_length # should be 1024
+
+        # # input_ids include the prompt and response and padding (left pad for prompt and right pad for response)
+        # # attention mask is 0 for padding and 1 for non-padding
+
+        # critic_attention_mask = attention_mask[:, :prompt_length + 1]
+        # critic_responses = responses[:, 0:1]
+        # critic_input_ids = input_ids[:, :prompt_length + 1]
+        # critic_position_ids = position_ids[:, :prompt_length + 1]
+
+        # micro_batch['responses'] = critic_responses
+        # micro_batch['input_ids'] = critic_input_ids
+        # micro_batch['attention_mask'] = critic_attention_mask
+        # micro_batch['position_ids'] = critic_position_ids
+
+        logits = super()._forward_micro_batch(micro_batch)
+
+        # # undo
+        # micro_batch['responses'] = responses
+        # micro_batch['input_ids'] = input_ids
+        # micro_batch['attention_mask'] = attention_mask
+        # micro_batch['position_ids'] = position_ids
+
+        return torch.sigmoid(logits)

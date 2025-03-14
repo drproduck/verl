@@ -289,6 +289,8 @@ def compute_policy_loss(old_log_prob, log_prob, advantages, eos_mask, cliprange)
             policy gradient loss computed via PPO
         pg_clipfrac: (float)
             a float number indicating the fraction of policy gradient loss being clipped
+        ppo_kl: difference between the log prob and the old log prob 
+            (a debug metric for ratio e.g. should be 0 at epoch start and close to 0)
 
     """
     negative_approx_kl = log_prob - old_log_prob

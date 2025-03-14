@@ -282,6 +282,8 @@ class DataParallelPPOActor(BasePPOActor):
                     # all return: (bsz, response_length)
                     entropy, log_prob = self._forward_micro_batch(micro_batch=data, temperature=temperature)
 
+                    # NOTE: ppo_kl is between log_prob and old_log_prob and should be roughly 0.
+                    # while kl_losss is between log_prob and ref_log_prob and should be increasing.
                     pg_loss, pg_clipfrac, ppo_kl = core_algos.compute_policy_loss(old_log_prob=old_log_prob,
                                                                                   log_prob=log_prob,
                                                                                   advantages=advantages,
