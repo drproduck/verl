@@ -145,7 +145,7 @@ class MathQuestionAnswerDataset(Dataset):
                                                                          max_length=self.max_prompt_length,
                                                                          pad_token_id=self.tokenizer.pad_token_id,
                                                                          left_pad=True,
-                                                                         truncation='error',
+                                                                         truncation='left',
                                                                          )
 
         position_ids = compute_position_id_with_mask(attention_mask)
