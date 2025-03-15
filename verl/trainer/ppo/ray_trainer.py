@@ -636,7 +636,7 @@ class RayPPOTrainer(object):
         #                                filter_prompts=True,
         #                                return_raw_chat=self.config.data.get('return_raw_chat', False),
         #                                truncation='error')
-        self.val_dataset = MathQuestionAnswerDataset(parquet_files=self.config.data.train_files,
+        self.val_dataset = MathQuestionAnswerDataset(parquet_files=self.config.data.val_files,
                                                      tokenizer=self.tokenizer,
                                                      prompt_key=self.config.data.prompt_key,
                                                      answer_key=self.config.data.answer_key,
@@ -686,11 +686,11 @@ class RayPPOTrainer(object):
 
         # Create tuples of (input, output, score) and sort by input text
         samples = list(zip(inputs, outputs, scores))
-        samples.sort(key=lambda x: x[0])  # Sort by input text
+        # samples.sort(key=lambda x: x[0])  # Sort by input text
 
         # Use fixed random seed for deterministic shuffling
-        rng = np.random.RandomState(42)
-        rng.shuffle(samples)
+        # rng = np.random.RandomState(42)
+        # rng.shuffle(samples)
 
         # Take first N samples after shuffling
         samples = samples[:generations_to_log]
