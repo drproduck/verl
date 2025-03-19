@@ -660,6 +660,7 @@ def create_colocated_worker_cls(class_dict: Dict[str, RayClassWithInitArgs]) -> 
             for key, user_defined_cls in cls_dict.items():
                 user_defined_cls = _unwrap_ray_remote(user_defined_cls)
                 # directly instantiate the class without remote
+                # in worker class, e.g. <verl.single_controller.base.worker.Worker> when DISABLE_WORKER_INIT == 1 it will return immediately
                 with patch.dict(os.environ, {'DISABLE_WORKER_INIT': '1'}):
                     self.worker_dict[key] = user_defined_cls(*init_args_dict[key].get('args', ()),
                                                              **init_args_dict[key].get('kwargs', {}))

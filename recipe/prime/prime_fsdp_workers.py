@@ -210,8 +210,10 @@ class PRIMERewardModelWorker(Worker):
                                        weight_decay=config.model.optim.get('weight_decay', 1e-2))
 
         total_steps = config.model.optim.get('total_training_steps', 0)
-        num_warmup_steps_ratio = config.model.optim.get('lr_warmup_steps_ratio', 0.)
-        num_warmup_steps = int(num_warmup_steps_ratio * total_steps)
+        num_warmup_steps = int(config.model.optim.get('lr_warmup_steps', -1))
+        if num_warmup_steps < 0:
+            num_warmup_steps_ratio = config.model.optim.get('lr_warmup_steps_ratio', 0.)
+            num_warmup_steps = int(num_warmup_steps_ratio * total_steps)
 
         print(f'Total steps: {total_steps}, num_warmup_steps: {num_warmup_steps}')
 
@@ -246,8 +248,6 @@ class PRIMERewardModelWorker(Worker):
                                                         optimizer=self.reward_optimizer,
                                                         lr_scheduler=self.reward_lr_scheduler,
                                                         tokenizer=self.tokenizer)
-
-        torch.cuda.empty_cache()
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_rm_score(self, data: DataProto):
@@ -321,7 +321,6 @@ class PRIMERewardModelWorker(Worker):
             offload_fsdp_model_to_cpu(self.ref_module)
         if self._is_offload_optimizer:
             offload_fsdp_optimizer(optimizer=self.reward_optimizer)
-        torch.cuda.empty_cache()
         output = output.to('cpu')
         return output
 
