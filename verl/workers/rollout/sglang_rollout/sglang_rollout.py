@@ -33,7 +33,7 @@ from omegaconf import DictConfig
 from tensordict import TensorDict
 from verl import DataProto
 from verl.workers.rollout.base import BaseRollout
-from verl.utils.torch_functional import get_eos_mask, pad_sequence_to_length, pad_2d_list_to_length
+from verl.utils.torch_functional import get_response_mask, pad_sequence_to_length, pad_2d_list_to_length
 from sglang.srt.entrypoints.verl_engine import VerlEngine
 from torch.distributed.device_mesh import init_device_mesh
 from sglang.srt.sampling.sampling_params import SamplingParams
@@ -103,12 +103,6 @@ class SGLangRollout(BaseRollout):
         super().__init__()
         self.config = config
 
-        # TODO(linjunrong.ocss884): this substitution is left for resolving SGLang conflict with ray devices
-        # isolation, will solve in the future
-        del os.environ["CUDA_VISIBLE_DEVICES"]
-        if os.environ["ENSURE_CUDA_VISIBLE_DEVICES"]:
-            os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["ENSURE_CUDA_VISIBLE_DEVICES"]
-
         assert not (not config.enforce_eager and
                     config.free_cache_engine), "disable CUDA graph (enforce_eager = False) if free cache engine"
 
@@ -142,16 +136,18 @@ class SGLangRollout(BaseRollout):
         # device_mesh_device = init_device_mesh("cuda", **device_mesh_kwargs)
 
         # get tp_rank of this process in this tp group
-        global_rank = device_mesh_cpu.get_rank()
-        tp_size = device_mesh_cpu["tp"].mesh.size()[0]
-        src_rank = global_rank // tp_size * tp_size
+        visible_devices = [None] * device_mesh_cpu.size(1)
+        torch.distributed.all_gather_object(visible_devices, os.environ["CUDA_VISIBLE_DEVICES"],
+                                            device_mesh_cpu.get_group("tp"))
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(visible_devices)
 
         self.inference_engine = VerlEngine(
             model_path=actor_module,
             dtype=config.dtype,
             mem_fraction_static=config.gpu_memory_utilization,
             device_mesh_cpu=device_mesh_cpu["tp"],
-            base_gpu_id=src_rank,
+            enable_memory_saver=True,
+            base_gpu_id=0,
             gpu_id_step=1,
             # NOTE(Chenyang): if you want to debug the sglang engine
             # please set the following parameters
@@ -233,7 +229,7 @@ class SGLangRollout(BaseRollout):
                 top_k=-1,
                 ignore_eos=False,
                 min_new_tokens=0,
-                max_new_tokens=4096,
+                max_new_tokens=self.config.response_length,
                 skip_special_tokens=True,
                 spaces_between_special_tokens=True,
             )
@@ -272,7 +268,9 @@ class SGLangRollout(BaseRollout):
         # position_ids:   [0,0,0,0,0,1,2,3, | 4,5,6,7,8,9,10,11]
         response_position_ids = position_ids[:, -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
-        response_attention_mask = get_eos_mask(response_id=response, eos_token=eos_token_id, dtype=attention_mask.dtype)
+        response_attention_mask = get_response_mask(response_id=response,
+                                                    eos_token=eos_token_id,
+                                                    dtype=attention_mask.dtype)
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 
         # all the tp ranks should contain the same data here. data in all ranks are valid

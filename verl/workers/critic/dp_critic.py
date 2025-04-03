@@ -134,7 +134,13 @@ class DataParallelPPOCritic(BasePPOCritic):
             grad_norm = self.critic_module.clip_grad_norm_(self.config.grad_clip)
         else:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.critic_module.parameters(), max_norm=self.config.grad_clip)
-        self.critic_optimizer.step()
+
+        # if grad_norm is not finite, skip the update
+        if not torch.isfinite(grad_norm):
+            print(f"WARN: grad_norm is not finite: {grad_norm}")
+            self.critic_optimizer.zero_grad()
+        else:
+            self.critic_optimizer.step()
         return grad_norm
 
     def compute_values(self, data: DataProto) -> torch.Tensor:
@@ -226,7 +232,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     returns = data['returns']
                     response_length = responses.size(1)
 
-                    eos_mask = attention_mask[:, -response_length - 1:-1] # shift left by 1
+                    response_mask = attention_mask[:, -response_length - 1:-1]
 
                     vpreds = self._forward_micro_batch(data)
 
@@ -235,7 +241,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     vf_loss, vf_clipfrac = core_algos.compute_value_loss(vpreds=vpreds,
                                                                          values=values,
                                                                          returns=returns,
-                                                                         eos_mask=eos_mask,
+                                                                         response_mask=response_mask,
                                                                          cliprange_value=self.config.cliprange_value)
                     if self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz
@@ -249,7 +255,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     data = {
                         'critic/vf_loss': vf_loss.detach().item(),
                         'critic/vf_clipfrac': vf_clipfrac.detach().item(),
-                        'critic/vpred_mean': masked_mean(vpreds, eos_mask).detach().item(),
+                        'critic/vpred_mean': masked_mean(vpreds, response_mask).detach().item(),
                     }
 
                     append_to_dict(metrics, data)
@@ -270,45 +276,16 @@ class DataParallelPPOCriticOneStep(DataParallelPPOCritic):
         super().__init__(config, critic_module, critic_optimizer)
 
         # dynamically change the compute_value_loss in update_critic
-        def compute_sigmoid_loss(vpreds, returns, values, eos_mask, cliprange_value):
+        def compute_sigmoid_loss(vpreds, returns, values, response_mask, cliprange_value):
             """
             vpreds is expited
             """
             vf_losses = torch.nn.functional.binary_cross_entropy(vpreds, returns, reduction='none')
-            vf_loss = torch.mean(vf_losses * eos_mask)
+            vf_loss = torch.mean(vf_losses * response_mask)
             return vf_loss, vf_loss
 
         core_algos.compute_value_loss = compute_sigmoid_loss
 
     def _forward_micro_batch(self, micro_batch):
-        # responses = micro_batch['responses']
-        # response_length = responses.size(-1)
-        # input_ids = micro_batch['input_ids']
-        # batch, seqlen = input_ids.shape
-        # attention_mask = micro_batch['attention_mask']
-        # position_ids = micro_batch['position_ids']
-        
-        # prompt_length = seqlen - response_length # should be 1024
-
-        # # input_ids include the prompt and response and padding (left pad for prompt and right pad for response)
-        # # attention mask is 0 for padding and 1 for non-padding
-
-        # critic_attention_mask = attention_mask[:, :prompt_length + 1]
-        # critic_responses = responses[:, 0:1]
-        # critic_input_ids = input_ids[:, :prompt_length + 1]
-        # critic_position_ids = position_ids[:, :prompt_length + 1]
-
-        # micro_batch['responses'] = critic_responses
-        # micro_batch['input_ids'] = critic_input_ids
-        # micro_batch['attention_mask'] = critic_attention_mask
-        # micro_batch['position_ids'] = critic_position_ids
-
         logits = super()._forward_micro_batch(micro_batch)
-
-        # # undo
-        # micro_batch['responses'] = responses
-        # micro_batch['input_ids'] = input_ids
-        # micro_batch['attention_mask'] = attention_mask
-        # micro_batch['position_ids'] = position_ids
-
         return torch.sigmoid(logits)
