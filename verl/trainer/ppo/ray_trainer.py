@@ -323,8 +323,8 @@ class RayPPOTrainer(object):
 
         # avoid add kl to reward in GRPO
         # note RLOO also includes kl in reward.
-        if config.algorithm.adv_estimator in [AdvantageEstimator.GRPO, AdvantageEstimator.DIFFICULTY]:
-            assert config.actor_rollout_ref.actor.use_kl_loss is True, 'GRPO separates kl loss from reward.'
+        # if config.algorithm.adv_estimator in [AdvantageEstimator.GRPO, AdvantageEstimator.DIFFICULTY]:
+        #     assert config.actor_rollout_ref.actor.use_kl_loss is True, 'GRPO separates kl loss from reward.'
 
         # number of GPUs total
         n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
@@ -1000,15 +1000,15 @@ class RayPPOTrainer(object):
                     'train/response_length': metrics['response_length/mean'], 
                     'train/reward': metrics['critic/rewards/mean'],
                     'train/actor_lr': metrics['actor/lr'],
-                    'train/critic_lr': metrics['critic/lr'],
                     'train/policy_loss': metrics['actor/pg_loss'],
-                    'train/critic_loss': metrics['critic/vf_loss'],
                     'train/kl': metrics['actor/ppo_kl'],
                 })
 
                 if self.use_critic:
                     metrics.update({
                         'train/values': metrics['critic/values/mean'],
+                        'train/critic_lr': metrics['critic/lr'],
+                        'train/critic_loss': metrics['critic/vf_loss'],
                     })
 
                 # TODO: make a canonical logger that supports various backend
