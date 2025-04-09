@@ -27,6 +27,7 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 from verl.utils.model import compute_position_id_with_mask
 import verl.utils.torch_functional as verl_F
 
+import pandas as pd
 
 def collate_fn(data_list: list[dict]) -> dict:
     tensors = defaultdict(list)
