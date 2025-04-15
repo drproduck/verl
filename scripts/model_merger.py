@@ -38,7 +38,7 @@ parser.add_argument(
     type=str,
     required=True,
     help=
-    "The path for your saved model. For megatron, point to the base dir of model, rng, optimizer checkpoints, commonly be `config.default_local_dir/global_step_\{global_step\}`."
+    r"The path for your saved model. For megatron, point to the base dir of model, rng, optimizer checkpoints, commonly be `config.default_local_dir/global_step_\{global_step\}`."
 )
 parser.add_argument('--target_dir', required=False, default="tmp", type=str, help="The path for the target model")
 parser.add_argument("--hf_upload_path", default=False, type=str, help="The path of the huggingface repo to upload")
@@ -196,6 +196,12 @@ def convert_fsdp_checkpoints_to_hfmodels():
     model.save_pretrained(hf_path, state_dict=state_dict)
     del state_dict
     del model
+
+    # also save the tokenizer
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.hf_model_path)
+    tokenizer.save_pretrained(hf_path)
+
     if args.hf_upload_path:
         upload_model_to_huggingface(hf_path)
 
