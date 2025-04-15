@@ -177,7 +177,7 @@ def convert_fsdp_checkpoints_to_hfmodels():
         hf_path = os.path.join(local_dir, 'huggingface')
     else:
         hf_path = args.target_dir
-    config = AutoConfig.from_pretrained(args.hf_model_path)
+    config = AutoConfig.from_pretrained(args.hf_model_path, trust_remote_code=True)
 
     if 'ForTokenClassification' in config.architectures[0]:
         auto_model = AutoModelForTokenClassification
@@ -199,7 +199,7 @@ def convert_fsdp_checkpoints_to_hfmodels():
 
     # also save the tokenizer
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.hf_model_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.hf_model_path, trust_remote_code=True)
     tokenizer.save_pretrained(hf_path)
 
     if args.hf_upload_path:
