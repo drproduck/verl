@@ -47,6 +47,9 @@ parser.add_argument("--test_hf_dir",
                     type=str,
                     required=False,
                     help="test correctness of hf_model, , with hf_model in checkpoint.contents")
+
+parser.add_argument("--overwrite", action="store_true", help="Override the target dir if it exists")
+
 args = parser.parse_args()
 os.makedirs(args.target_dir, exist_ok=True)
 if args.test:
@@ -439,6 +442,22 @@ def _replace_name(megatron_name, name_mapping):
 
 
 if __name__ == '__main__':
+    if args.target_dir is None:
+        hf_path = os.path.join(args.local_dir, 'huggingface')
+    else:
+        hf_path = args.target_dir
+
+    # check if tokenizer.json already in it. it means the model is already in hf format.
+    if os.path.exists(os.path.join(hf_path, "tokenizer.json")):
+        print(f"Checkpoint {hf_path} already exists.")
+        if args.overwrite:
+            print(f"Overwriting {hf_path} with new checkpoint.")
+        else:
+            print("overwrite is false. Exiting.")
+            exit(0)
+
+    print(f"Converting checkpoint {hf_path} to hf format.")
+
     if args.backend == "fsdp":
         convert_fsdp_checkpoints_to_hfmodels()
     elif args.backend == "megatron":
