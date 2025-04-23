@@ -88,7 +88,7 @@ class MathQuestionAnswerDataset(Dataset):
     """
 
     def __init__(self,
-                 parquet_files: Union[str, List[str]],
+                 data_files: Union[str, List[str]],
                  tokenizer: PreTrainedTokenizer,
                  prompt_key='prompt',
                  answer_key='answer',
@@ -100,7 +100,7 @@ class MathQuestionAnswerDataset(Dataset):
         if not isinstance(parquet_files, (List, ListConfig)):
             parquet_files = [parquet_files]
 
-        self.parquet_files = copy.deepcopy(parquet_files)
+        self.data_files = copy.deepcopy(data_files)
         self.tokenizer = tokenizer
         self.max_prompt_length = max_prompt_length
 
@@ -110,32 +110,57 @@ class MathQuestionAnswerDataset(Dataset):
         # whether to store the dataset in state_dict()
         # default not store
         self.serialize_dataset = False
-        self._read_files_and_tokenize()
+        self._load_dataset()
 
 
-    def _read_files_and_tokenize(self):
-        print(f'loading dataset from {self.parquet_files}')
-        dataframes = []
-        for parquet_file in self.parquet_files:
-            # read parquet files and cache
-            dataframe = pd.read_parquet(parquet_file)
-            dataframes.append(dataframe)
-        self.dataframe = pd.concat(dataframes)
+    # def _read_files_and_tokenize(self):
+    #     print(f'loading dataset from {self.parquet_files}')
+    #     dataframes = []
+    #     for parquet_file in self.parquet_files:
+    #         # read parquet files and cache
+    #         dataframe = pd.read_parquet(parquet_file)
+    #         dataframes.append(dataframe)
+    #     self.dataframe = pd.concat(dataframes)
 
-        print(f'original dataset len: {len(self.dataframe)}')
+    #     print(f'original dataset len: {len(self.dataframe)}')
 
 
     def __len__(self):
         return len(self.dataframe)
+
+    
+    def _load_dataset(self) -> List[dict]:
+        """
+        load dataset from local path or huggingface hub
+        """
+        print(f'loading dataset from {self.data_files}')
+        self.dataframe = []
+        for data_file in self.data_files:
+            # load dataset
+            extension = os.path.splitext(data_file)[1]
+            if extension in ['.parquet', '.json', '.jsonl']:
+                dataset = datasets.load_dataset(extension[1:], data_files=data_file, split='train')
+            elif extension == '':
+                dataset = datasets.load_dataset(data_file, split='train')
+            else:
+                raise ValueError(f'Unsupported file extension: {extension}')
+            self.dataframe.extend(dataset.to_list())
+        
+        print(f'original dataset len: {len(self.dataframe)}')
 
 
     def __getitem__(self, item):
         """
         We do not apply chat template.
         """
-        row_dict = self.dataframe.iloc[item].to_dict()
+        # row_dict = self.dataframe.iloc[item].to_dict()
+        row_dict = self.dataframe[item]
 
         row_dict['prompt'] = row_dict.pop(self.prompt_key)
+        # input_data = self.tokenizer(prompt, return_tensors='pt', add_special_tokens=False)
+
+        # input_ids = input_data['input_ids']
+        # attention_mask = input_data['attention_mask']
 
         input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=row_dict['prompt'],
                                                                          tokenizer=self.tokenizer,
