@@ -460,7 +460,7 @@ class RayPPOTrainer(object):
         #                                  filter_prompts=True,
         #                                  return_raw_chat=self.config.data.get('return_raw_chat', False),
         #                                  truncation='error')
-        self.train_dataset = MathQuestionAnswerDataset(parquet_files=self.config.data.train_files,
+        self.train_dataset = MathQuestionAnswerDataset(data_files=self.config.data.train_files,
                                                        tokenizer=self.tokenizer,
                                                        prompt_key=self.config.data.prompt_key,
                                                        answer_key=self.config.data.answer_key,
@@ -488,7 +488,7 @@ class RayPPOTrainer(object):
         #                                filter_prompts=True,
         #                                return_raw_chat=self.config.data.get('return_raw_chat', False),
         #                                truncation='error')
-        self.val_dataset = MathQuestionAnswerDataset(parquet_files=self.config.data.val_files,
+        self.val_dataset = MathQuestionAnswerDataset(data_files=self.config.data.val_files,
                                                      tokenizer=self.tokenizer,
                                                      prompt_key=self.config.data.prompt_key,
                                                      answer_key=self.config.data.answer_key,

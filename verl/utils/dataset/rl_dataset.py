@@ -96,9 +96,8 @@ class MathQuestionAnswerDataset(Dataset):
                  ):
         """
         """
-    
-        if not isinstance(parquet_files, (List, ListConfig)):
-            parquet_files = [parquet_files]
+        if not isinstance(data_files, (List, ListConfig)):
+            data_files = [data_files]
 
         self.data_files = copy.deepcopy(data_files)
         self.tokenizer = tokenizer
