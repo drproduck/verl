@@ -156,13 +156,13 @@ class MathQuestionAnswerDataset(Dataset):
         # row_dict = self.dataframe.iloc[item].to_dict()
         row_dict = self.dataframe[item]
 
-        prompt = row_dict.pop(self.prompt_key)
+        row_dict['prompt'] = row_dict.pop(self.prompt_key)
         # input_data = self.tokenizer(prompt, return_tensors='pt', add_special_tokens=False)
 
         # input_ids = input_data['input_ids']
         # attention_mask = input_data['attention_mask']
 
-        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt,
+        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=row_dict['prompt'],
                                                                          tokenizer=self.tokenizer,
                                                                          max_length=self.max_prompt_length,
                                                                          pad_token_id=self.tokenizer.pad_token_id,
@@ -175,7 +175,7 @@ class MathQuestionAnswerDataset(Dataset):
         row_dict['input_ids'] = input_ids[0]
         row_dict['attention_mask'] = attention_mask[0]
         row_dict['position_ids'] = position_ids[0]
-        row_dict['raw_prompt_ids'] = self.tokenizer.encode(prompt, add_special_tokens=False)
+        row_dict['raw_prompt_ids'] = self.tokenizer.encode(row_dict['prompt'], add_special_tokens=False)
 
         # replace answer_key with answer
         row_dict['answer'] = row_dict.pop(self.answer_key)
