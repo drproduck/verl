@@ -135,13 +135,9 @@ class MathQuestionAnswerDataset(Dataset):
         """
         row_dict = self.dataframe.iloc[item].to_dict()
 
-        prompt = row_dict.pop(self.prompt_key)
-        # input_data = self.tokenizer(prompt, return_tensors='pt', add_special_tokens=False)
+        row_dict['prompt'] = row_dict.pop(self.prompt_key)
 
-        # input_ids = input_data['input_ids']
-        # attention_mask = input_data['attention_mask']
-
-        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt,
+        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=row_dict['prompt'],
                                                                          tokenizer=self.tokenizer,
                                                                          max_length=self.max_prompt_length,
                                                                          pad_token_id=self.tokenizer.pad_token_id,
@@ -154,10 +150,24 @@ class MathQuestionAnswerDataset(Dataset):
         row_dict['input_ids'] = input_ids[0]
         row_dict['attention_mask'] = attention_mask[0]
         row_dict['position_ids'] = position_ids[0]
-        row_dict['raw_prompt_ids'] = self.tokenizer.encode(prompt, add_special_tokens=False)
+        row_dict['raw_prompt_ids'] = self.tokenizer.encode(row_dict['prompt'], add_special_tokens=False)
 
         # replace answer_key with answer
         row_dict['answer'] = row_dict.pop(self.answer_key)
+
+        # do the same for critic
+        row_dict['critic_prompt'] = row_dict.pop('critic_prompt')
+        critic_input_ids, critic_attention_mask = verl_F.tokenize_and_postprocess_data(prompt=row_dict['critic_prompt'],
+                                                                         tokenizer=self.tokenizer,
+                                                                         max_length=self.max_prompt_length,
+                                                                         pad_token_id=self.tokenizer.pad_token_id,
+                                                                         left_pad=True,
+                                                                         truncation='left',
+                                                                         )
+        critic_position_ids = compute_position_id_with_mask(critic_attention_mask)
+        row_dict['critic_input_ids'] = critic_input_ids[0]
+        row_dict['critic_attention_mask'] = critic_attention_mask[0]
+        row_dict['critic_position_ids'] = critic_position_ids[0]
 
         # add index for each prompt
         index = row_dict.get("extra_info", {}).get("index", 0)
