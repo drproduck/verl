@@ -179,20 +179,6 @@ class MathQuestionAnswerDataset(Dataset):
         # replace answer_key with answer
         row_dict['answer'] = row_dict.pop(self.answer_key)
 
-        # do the same for critic
-        row_dict['critic_prompt'] = row_dict.pop('critic_prompt')
-        critic_input_ids, critic_attention_mask = verl_F.tokenize_and_postprocess_data(prompt=row_dict['critic_prompt'],
-                                                                         tokenizer=self.tokenizer,
-                                                                         max_length=self.max_prompt_length,
-                                                                         pad_token_id=self.tokenizer.pad_token_id,
-                                                                         left_pad=True,
-                                                                         truncation='left',
-                                                                         )
-        critic_position_ids = compute_position_id_with_mask(critic_attention_mask)
-        row_dict['critic_input_ids'] = critic_input_ids[0]
-        row_dict['critic_attention_mask'] = critic_attention_mask[0]
-        row_dict['critic_position_ids'] = critic_position_ids[0]
-
         # add index for each prompt
         index = row_dict.get("extra_info", {}).get("index", 0)
         row_dict["index"] = index
