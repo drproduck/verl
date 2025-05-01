@@ -136,11 +136,18 @@ class MathQuestionAnswerDataset(Dataset):
         self.dataframe = []
         for data_file in self.data_files:
             # load dataset
+            if '::' in data_file:
+                # assert there is only 1 '::'
+                assert data_file.count('::') == 1, f'Only support one :: in {data_file}'
+                data_file, split = data_file.split('::')
+            else:
+                split = 'train'
+
             extension = os.path.splitext(data_file)[1]
             if extension in ['.parquet', '.json', '.jsonl']:
-                dataset = datasets.load_dataset(extension[1:], data_files=data_file, split='train')
+                dataset = datasets.load_dataset(extension[1:], data_files=data_file, split=split)
             elif extension == '':
-                dataset = datasets.load_dataset(data_file, split='train')
+                dataset = datasets.load_dataset(data_file, split=split)
             else:
                 raise ValueError(f'Unsupported file extension: {extension}')
             self.dataframe.extend(dataset.to_list())
