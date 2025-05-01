@@ -631,6 +631,9 @@ class RayPPOTrainer(object):
 
         data_sources = np.concatenate(data_source_lst, axis=0)
 
+        #NOTE: hack to use original prompt (problem) instead of actual input prompt (e.g. augmented, maybe verification)
+        sample_inputs = reward_extra_infos_dict.get('original_prompt', sample_inputs)
+
         data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
