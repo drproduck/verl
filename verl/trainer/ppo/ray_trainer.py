@@ -464,7 +464,9 @@ class RayPPOTrainer(object):
                                                        tokenizer=self.tokenizer,
                                                        prompt_key=self.config.data.prompt_key,
                                                        answer_key=self.config.data.answer_key,
-                                                       max_prompt_length=self.config.data.max_prompt_length,)
+                                                       max_prompt_length=self.config.data.max_prompt_length,
+                                                       filter_overlong_prompts=self.config.data.filter_overlong_prompts,
+                                                       num_workers=self.config.data.filter_overlong_prompts_workers,)
         # use sampler for better ckpt resume
         if self.config.data.shuffle:
             train_dataloader_generator = torch.Generator()
@@ -488,11 +490,13 @@ class RayPPOTrainer(object):
         #                                filter_prompts=True,
         #                                return_raw_chat=self.config.data.get('return_raw_chat', False),
         #                                truncation='error')
+        # NOTE: don't filter overlong prompts in validation dataset because they don't consume training resource
         self.val_dataset = MathQuestionAnswerDataset(data_files=self.config.data.val_files,
                                                      tokenizer=self.tokenizer,
                                                      prompt_key=self.config.data.prompt_key,
                                                      answer_key=self.config.data.answer_key,
-                                                     max_prompt_length=self.config.data.max_prompt_length,)
+                                                     max_prompt_length=self.config.data.max_prompt_length,
+                                                     filter_overlong_prompts=False,)
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,

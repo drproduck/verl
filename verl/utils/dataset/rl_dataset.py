@@ -93,6 +93,8 @@ class MathQuestionAnswerDataset(Dataset):
                  prompt_key='prompt',
                  answer_key='answer',
                  max_prompt_length=1024,
+                 filter_overlong_prompts: bool = False,
+                 num_workers: Optional[int] = -1,
                  ):
         """
         """
@@ -106,22 +108,16 @@ class MathQuestionAnswerDataset(Dataset):
         self.prompt_key = prompt_key
         self.answer_key = answer_key
 
+        self.filter_overlong_prompts = filter_overlong_prompts
+        if num_workers <= 0:
+            self.num_workers = max(1, os.cpu_count() // 4)
+        else:
+            self.num_workers = min(num_workers, os.cpu_count())
+
         # whether to store the dataset in state_dict()
         # default not store
         self.serialize_dataset = False
         self._load_dataset()
-
-
-    # def _read_files_and_tokenize(self):
-    #     print(f'loading dataset from {self.parquet_files}')
-    #     dataframes = []
-    #     for parquet_file in self.parquet_files:
-    #         # read parquet files and cache
-    #         dataframe = pd.read_parquet(parquet_file)
-    #         dataframes.append(dataframe)
-    #     self.dataframe = pd.concat(dataframes)
-
-    #     print(f'original dataset len: {len(self.dataframe)}')
 
 
     def __len__(self):
@@ -133,7 +129,7 @@ class MathQuestionAnswerDataset(Dataset):
         load dataset from local path or huggingface hub
         """
         print(f'loading dataset from {self.data_files}')
-        self.dataframe = []
+        dataframes = []
         for data_file in self.data_files:
             # load dataset
             if '::' in data_file:
@@ -150,9 +146,29 @@ class MathQuestionAnswerDataset(Dataset):
                 dataset = datasets.load_dataset(data_file, split=split)
             else:
                 raise ValueError(f'Unsupported file extension: {extension}')
-            self.dataframe.extend(dataset.to_list())
-        
+            dataframes.append(dataset)
+        self.dataframe: datasets.Dataset = datasets.concatenate_datasets(dataframes)
+        if self.prompt_key != 'prompt':
+            self.dataframe = self.dataframe.rename_column(self.prompt_key, 'prompt')
+        if self.answer_key != 'answer':
+            self.dataframe = self.dataframe.rename_column(self.answer_key, 'answer')
         print(f'original dataset len: {len(self.dataframe)}')
+
+
+        # filter out too long prompts
+        if self.filter_overlong_prompts:
+
+            def is_valid_length(sample):
+                return len(
+                    self.tokenizer.tokenize(
+                        sample[self.prompt_key])) <= self.max_prompt_length
+
+            self.dataframe = self.dataframe.filter(
+                is_valid_length,
+                num_proc=self.num_workers,
+                desc=f"Filtering prompts longer than {self.max_prompt_length} tokens")
+
+            print(f'filter dataset len: {len(self.dataframe)}')
 
 
     def __getitem__(self, item):
@@ -162,29 +178,21 @@ class MathQuestionAnswerDataset(Dataset):
         # row_dict = self.dataframe.iloc[item].to_dict()
         row_dict = self.dataframe[item]
 
-        row_dict['prompt'] = row_dict.pop(self.prompt_key)
-        # input_data = self.tokenizer(prompt, return_tensors='pt', add_special_tokens=False)
-
-        # input_ids = input_data['input_ids']
-        # attention_mask = input_data['attention_mask']
-
-        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=row_dict['prompt'],
-                                                                         tokenizer=self.tokenizer,
-                                                                         max_length=self.max_prompt_length,
-                                                                         pad_token_id=self.tokenizer.pad_token_id,
-                                                                         left_pad=True,
-                                                                         truncation='left',
-                                                                         )
+        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
+            prompt=row_dict['prompt'],
+            tokenizer=self.tokenizer,
+            max_length=self.max_prompt_length,
+            pad_token_id=self.tokenizer.pad_token_id,
+            left_pad=True,
+            truncation='left',)
 
         position_ids = compute_position_id_with_mask(attention_mask)
 
         row_dict['input_ids'] = input_ids[0]
         row_dict['attention_mask'] = attention_mask[0]
         row_dict['position_ids'] = position_ids[0]
-        row_dict['raw_prompt_ids'] = self.tokenizer.encode(row_dict['prompt'], add_special_tokens=False)
-
-        # replace answer_key with answer
-        row_dict['answer'] = row_dict.pop(self.answer_key)
+        row_dict['raw_prompt_ids'] = self.tokenizer.encode(
+            row_dict['prompt'], add_special_tokens=False)
 
         # add index for each prompt
         index = row_dict.get("extra_info", {}).get("index", 0)
