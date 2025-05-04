@@ -549,7 +549,9 @@ class RayPPOTrainer(object):
         # rng.shuffle(samples)
 
         # Take first N samples after shuffling
-        samples = samples[:generations_to_log]
+        # if generations_to_log < 0, take all samples
+        if generations_to_log > 0:
+            samples = samples[:generations_to_log]
 
         # Log to each configured logger
         self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
