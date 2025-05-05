@@ -174,6 +174,7 @@ class MathQuestionAnswerDataset(Dataset):
     def __getitem__(self, item):
         """
         We do not apply chat template.
+        raw_prompt_ids is the tokenized prompt without padding or truncation.
         """
         # row_dict = self.dataframe.iloc[item].to_dict()
         row_dict = self.dataframe[item]

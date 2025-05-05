@@ -496,7 +496,8 @@ class RayPPOTrainer(object):
                                                      prompt_key=self.config.data.prompt_key,
                                                      answer_key=self.config.data.answer_key,
                                                      max_prompt_length=self.config.data.max_prompt_length,
-                                                     filter_overlong_prompts=False,)
+                                                     filter_overlong_prompts=self.config.data.filter_overlong_prompts,
+                                                     num_workers=self.config.data.filter_overlong_prompts_workers,)
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,
@@ -638,7 +639,7 @@ class RayPPOTrainer(object):
         data_sources = np.concatenate(data_source_lst, axis=0)
 
         #NOTE: hack to use original prompt (problem) instead of actual input prompt (e.g. augmented, maybe verification)
-        sample_inputs = reward_extra_infos_dict.get('original_prompt', sample_inputs)
+        # sample_inputs = reward_extra_infos_dict.get('original_prompt', sample_inputs)
 
         data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
         metric_dict = {}
